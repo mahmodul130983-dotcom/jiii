@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Air Energy Ball - MediaPipe & Three.js</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #020208;
+            font-family: Arial, sans-serif;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 2;
+        }
+        /* ব্যাকগ্রাউন্ডে ওয়েবক্যাম ভিডিওর জন্য mirror এফেক্ট */
+        #webcam {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            transform: scaleX(-1);
+            z-index: 1;
+            opacity: 0.45; /* ভিডিও ব্যাকগ্রাউন্ড আবছা রাখা হয়েছে যাতে ৩ডি বলটি ভালো ফুটে ওঠে */
+        }
+        #hud-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #00f3ff;
+            z-index: 10;
+            text-shadow: 0 0 10px rgba(0,243,255,0.5);
+            pointer-events: none;
+        }
+        .status { font-weight: bold; font-size: 1.2rem; margin-bottom: 5px;}
+        .instruction { color: #fff; opacity: 0.8; font-size: 0.9rem; line-height: 1.5; }
+    </style>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <div id="hud-overlay">
+        <div class="status" id="sys-status">সিস্টেম লোড হচ্ছে...</div>
+        <div class="instruction">
+            👋 ক্যামেরার সামনে হাত আনুন।<br>
+            👌 আঙুল দিয়ে চিমটি (Pinch) কাটলে এনার্জি বল ছোট/বড় হবে।<br>
+            ⚡ দুই হাত একসাথে আনলে তীব্র শকওয়েভ অরা তৈরি হবে!
+        </div>
+    </div>
+
+    <video id="webcam" autoplay playsinline></video>
+    <div id="canvas-container"></div>
+
+    <script>
+        let scene, camera, renderer;
+        let energyBall1, energyBall2, auraLines;
+        const videoElement = document.getElementById('webcam');
+        const statusStatus = document.getElementById('sys-status');
+
+        // --- ১. THREE.JS সিন সেটআপ ---
+        function initThree() {
+            const container = document.getElementById('canvas-container');
+            
+            scene = new THREE.Scene();
+            
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 15;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            // গ্লোয়িং পার্টিকেল টেক্সচার জেনারেটর (সফট সার্কেল)
+            const canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+            grad.addColorStop(0, 'rgba(255,255,255,1)');
+            grad.addColorStop(0.3, 'rgba(0,243,255,0.8)');
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grad; ctx.fillRect(0, 0, 32, 32);
+            const particleTexture = new THREE.CanvasTexture(canvas);
+
+            // এনার্জি বল তৈরির ফাংশন (স্পাইরাল কণা বা পার্টিকেলস)
+            function createEnergyBall() {
+                const particleCount = 2000;
+                const geo = new THREE.BufferGeometry();
+                const pos = new Float32Array(particleCount * 3);
+                const colors = new Float32Array(particleCount * 3);
+                const color = new THREE.Color(0x00f3ff);
+
+                for (let i = 0; i < particleCount; i++) {
+                    const i3 = i * 3;
+                    // গোলকৃতির মধ্যে পার্টিকেল ডিস্ট্রিবিউশন
+                    const u = Math.random(); const v = Math.random();
+                    const theta = u * 2.0 * Math.PI;
+                    const phi = Math.acos(2.0 * v - 1.0);
+                    const r = Math.random() * 1.5; // ব্যাসার্ধ
+
+                    pos[i3] = r * Math.sin(phi) * Math.cos(theta);
+                    pos[i3+1] = r * Math.sin(phi) * Math.sin(theta);
+                    pos[i3+2] = r * Math.cos(phi);
+
+                    // সায়ান এবং নীল রঙের মিক্সড লাইট এফেক্ট
+                    const c = color.clone().lerp(new THREE.Color(0x0055ff), Math.random() * 0.5);
+                    colors[i3] = c.r; colors[i3+1] = c.g; colors[i3+2] = c.b;
+                }
+
+                geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+                const mat = new THREE.PointsMaterial({
+                    size: 0.25,
+                    map: particleTexture,
+                    transparent: true,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false,
+                    vertexColors: true
+                });
+
+                const points = new THREE.Points(geo, mat);
+                points.visible = false; // শুরুতে হাইড থাকবে, হাত দেখা গেলে অন হবে
+                scene.add(points);
+                return points;
+            }
+
+            energyBall1 = createEnergyBall();
+            energyBall2 = createEnergyBall();
+
+            // দুই হাতের মাঝখানের শকওয়েভ লাইট লাইন্স (Aura)
+            const lineMat = new THREE.LineBasicMaterial({ 
+                color: 0x00ffff, 
+                transparent: true, 
+                blending: THREE.AdditiveBlending,
+                opacity: 0.7 
+            });
+            const lineGeo = new THREE.BufferGeometry();
+            const linePositions = new Float32Array(200 * 3);
+            lineGeo.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
+            auraLines = new THREE.LineSegments(lineGeo, lineMat);
+            scene.add(auraLines);
+
+            window.addEventListener('resize', onWindowResize);
+            animate();
+        }
+
+        // --- ২. কোঅর্ডিনেট ম্যাপিং (MediaPipe থেকে Three.js 3D স্পেস) ---
+        function mapCoordinates(handLandmark) {
+            // MediaPipe এর ০-১ কোঅর্ডিনেটকে স্ক্রিনের থ্রি-ডি কোঅর্ডিনেটে রূপান্তর
+            const x = (0.5 - handLandmark.x) * 20; // Mirror এর জন্য উল্টানো হয়েছে
+            const y = (0.5 - handLandmark.y) * 14;
+            const z = handLandmark.z * -25;
+            return new THREE.Vector3(x, y, z);
+        }
+
+        // --- ৩. রিয়েল-টাইম হ্যান্ড ট্র্যাকিং লজিক ---
+        function onHandResults(results) {
+            // ডিফল্টভাবে বল এবং অরা হাইড রাখা
+            energyBall1.visible = false;
+            energyBall2.visible = false;
+            auraLines.visible = false;
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                statusStatus.innerText = "⚡ এনার্জি সিস্টেম: কানেক্টেড ⚡";
+                statusStatus.style.color = "#00ff77";
+
+                const hand1 = results.multiHandLandmarks[0];
+                const wrist1 = hand1[9]; 
+                const p1 = mapCoordinates(wrist1);
+
+              
+                energyBall1.visible = true;
+                energyBall1.position.copy(p1);
+
+
+                const thumbTip1 = hand1[4];
+                const indexTip1 = hand1[8];
+                const dist1 = Math.hypot(thumbTip1.x - indexTip1.x, thumbTip1.y - indexTip1.y);
+                const ballScale1 = THREE.MathUtils.mapLinear(dist1, 0.03, 0.25, 0.3, 3.5);
+                energyBall1.scale.setScalar(ballScale1);
+
+                if (results.multiHandLandmarks.length > 1) {
+                    const hand2 = results.multiHandLandmarks[1];
+                    const wrist2 = hand2[9];
+                    const p2 = mapCoordinates(wrist2);
+
+                    energyBall2.visible = true;
+                    energyBall2.position.copy(p2);
+
+                    const thumbTip2 = hand2[4];
+                    const indexTip2 = hand2[8];
+                    const dist2 = Math.hypot(thumbTip2.x - indexTip2.x, thumbTip2.y - indexTip2.y);
+                    const ballScale2 = THREE.MathUtils.mapLinear(dist2, 0.03, 0.25, 0.3, 3.5);
+                    energyBall2.scale.setScalar(ballScale2);
+
+                    auraLines.visible = true;
+                    const linePos = auraLines.geometry.attributes.position.array;
+                    
+                    for (let i = 0; i < 200; i += 2) {
+                        const idx = i * 3;
+                        
+                        linePos[idx] = p1.x; linePos[idx+1] = p1.y; linePos[idx+2] = p1.z;
+                    
+                        linePos[idx+3] = p2.x + (Math.random() - 0.5) * 3;
+                        linePos[idx+4] = p2.y + (Math.random() - 0.5) * 3;
+                        linePos[idx+5] = p2.z + (Math.random() - 0.5) * 3;
+                    }
+                    auraLines.geometry.attributes.position.needsUpdate = true;
+                }
+            } else {
+                statusStatus.innerText = "ক্যামেরার সামনে হাত আনুন...";
+                statusStatus.style.color = "#00f3ff";
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = Date.now() * 0.003;
+
+        
+            if (energyBall1.visible) {
+                energyBall1.rotation.y = time * 2;
+                energyBall1.rotation.z = time * 1.5;
+            }
+            if (energyBall2.visible) {
+                energyBall2.rotation.y = -time * 2;
+                energyBall2.rotation.z = -time * 1.5;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initThree();
+
+            const hands = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+
+            hands.setOptions({
+                maxNumHands: 2, //
+                modelComplexity: 1,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            hands.onResults(onHandResults);
+
+            const cameraUtils = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({ image: videoElement });
+                },
+                width: 640,
+                height: 480
+            });
+            cameraUtils.start();
+        });
+    </script>
+</body>
+</html>
