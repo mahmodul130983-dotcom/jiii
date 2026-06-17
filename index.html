@@ -177,20 +177,21 @@
                 statusStatus.style.color = "#00ff77";
 
                 const hand1 = results.multiHandLandmarks[0];
-                const wrist1 = hand1[9]; 
+                const wrist1 = hand1[9]; // হাতের মাঝখানের জয়েন্ট
                 const p1 = mapCoordinates(wrist1);
 
-              
+                // প্রথম হাত: বল অ্যাক্টিভেশন এবং পজিশন
                 energyBall1.visible = true;
                 energyBall1.position.copy(p1);
 
-
+                // চিমটি (Pinch Distance) মেপে সাইজ কন্ট্রোল
                 const thumbTip1 = hand1[4];
                 const indexTip1 = hand1[8];
                 const dist1 = Math.hypot(thumbTip1.x - indexTip1.x, thumbTip1.y - indexTip1.y);
                 const ballScale1 = THREE.MathUtils.mapLinear(dist1, 0.03, 0.25, 0.3, 3.5);
                 energyBall1.scale.setScalar(ballScale1);
 
+                // দ্বিতীয় হাত যদি ক্যামেরার সামনে থাকে
                 if (results.multiHandLandmarks.length > 1) {
                     const hand2 = results.multiHandLandmarks[1];
                     const wrist2 = hand2[9];
@@ -205,14 +206,16 @@
                     const ballScale2 = THREE.MathUtils.mapLinear(dist2, 0.03, 0.25, 0.3, 3.5);
                     energyBall2.scale.setScalar(ballScale2);
 
+                    // --- ৪. দুই হাতের মাঝখানের ইলেকট্রিক শকওয়েভ অরা জেনারেট ---
                     auraLines.visible = true;
                     const linePos = auraLines.geometry.attributes.position.array;
                     
                     for (let i = 0; i < 200; i += 2) {
                         const idx = i * 3;
-                        
+                        // এক হাত থেকে অন্য হাতের দিকে লাইনের পজিশন
                         linePos[idx] = p1.x; linePos[idx+1] = p1.y; linePos[idx+2] = p1.z;
-                    
+                        
+                        // একটু আঁকাবাঁকা লাইটনিং এফেক্ট দেওয়ার জন্য র্যান্ডম নম্বর যোগ করা হয়েছে
                         linePos[idx+3] = p2.x + (Math.random() - 0.5) * 3;
                         linePos[idx+4] = p2.y + (Math.random() - 0.5) * 3;
                         linePos[idx+5] = p2.z + (Math.random() - 0.5) * 3;
@@ -225,12 +228,13 @@
             }
         }
 
+        // --- ৫. রেন্ডার লুপ এবং ঘূর্ণন (Spinning Animations) ---
         function animate() {
             requestAnimationFrame(animate);
 
             const time = Date.now() * 0.003;
 
-        
+            // এনার্জি বলকে হাই-স্পিডে ঘোরানো (ভিডিওর মতো ফিল পেতে)
             if (energyBall1.visible) {
                 energyBall1.rotation.y = time * 2;
                 energyBall1.rotation.z = time * 1.5;
@@ -249,6 +253,7 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
+        // --- ৬. ক্যামেরা এবং মিডিয়া পাইপ রান করা ---
         window.addEventListener('DOMContentLoaded', () => {
             initThree();
 
@@ -257,7 +262,7 @@
             });
 
             hands.setOptions({
-                maxNumHands: 2, //
+                maxNumHands: 2, // সর্বোচ্চ ২টি হাত ট্র্যাক করবে
                 modelComplexity: 1,
                 minDetectionConfidence: 0.5,
                 minTrackingConfidence: 0.5
